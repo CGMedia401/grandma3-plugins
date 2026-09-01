@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <UserPlugin Name="Plugin Template" Version="0.0.0.0" Path="/PluginTemplate">
+        <ComponentLua Name="PluginTemplate" FileName="PluginTemplate.lua" />
+    </UserPlugin>
+</GMA3>
