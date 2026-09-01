@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <UserPlugin Name="Group Cleanup V4" Version="0.0.0.0" Path="/GroupCleanupV4">
+        <ComponentLua Name="GroupCleanupV4" FileName="GroupCleanupV4.lua" />
+    </UserPlugin>
+</GMA3>
