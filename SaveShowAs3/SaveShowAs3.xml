@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<GMA3 DataVersion="2.4.2.2">
-    <UserPlugin Name="Save Show As 3" Version="0.0.0.0" Path="/SaveShowAs3">
-        <ComponentLua Name="SaveShowAs3" FileName="SaveShowAs3.lua" />
-    </UserPlugin>
-</GMA3>

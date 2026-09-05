@@ -1,6 +1,7 @@
 # GrandMA3 Plugins
 
-Custom GrandMA3 onPC/console plugins for CG Media & Lites.
+Custom GrandMA3 onPC/console plugins for CG Media & Lites. Each folder
+holds only the most recent version of that plugin.
 
 ## PluginTemplate
 Starting point for any new plugin. Has the self-installing CG logo
@@ -19,11 +20,25 @@ group, both self-installing on first run via embedded base64 textures -
 copy the .lua anywhere and it deploys its own images, no manual file
 copying per machine.
 
-## SaveShowAs3
-Prompts to rename the show before saving, then appends a timestamp and
-saves. Custom UI window matching GroupCleanupV4's look (CG logo in the
-titlebar, same self-installing texture pipeline), with YES/NO buttons
-replacing the stock PopupInput dialog.
+## SaveShowAs4
+Prompts to rename the show before saving (pre-filled with the current
+show name), then appends an HHMM timestamp and saves - to the current
+drive (console/onPC) and, on top of that, to every USB stick plugged
+in at save time. Same CG-branded window chrome and self-installing
+logo pipeline as GroupCleanupV4.
+
+## PixelGroupStore
+Selects a Strike M or JDC fixture's RGB and White pixels, arranges each
+into a clean grid block, and stores each into a named group - supports
+a single fixture or a `Thru` range across multiple trusses, with
+per-fixture-type pixel addressing profiles.
+
+## DeleteHardValues
+Scans every sequence/cue/cue-part for attribute values that are plain
+hard values (not linked to a preset or recipe) and writes a plain-text
+report. Scan/report only - does not delete anything yet.
+
+---
 
 All plugins use the two-file `.xml` (descriptor) + `.lua` (source) format -
 import the `.xml` via Plugin Pool -> Import in GrandMA3.

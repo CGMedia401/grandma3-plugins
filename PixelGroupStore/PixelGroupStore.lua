@@ -3,19 +3,68 @@ local componentName  = select(2,...);
 local signalTable    = select(3,...);
 local my_handle      = select(4,...);
 
+--[[
+=====================================================================
+ PixelGroupStore.lua  -  GrandMA3 Plugin
+=====================================================================
+ WHAT THIS DOES
+ Asks which fixture type you're working with (PIXEL LINE IP / JDC 68 CH /
+ STRIKE M 97 CH), then a fixture number (or range), then selects that
+ fixture's RGB pixels and White pixels in turn - arranging each into the
+ Selection Grid via the same command sequence used by hand on the console -
+ and stores each selection into whichever of the three PIXEL groups you
+ pick, color-coded to match GroupCleanupV4's PIX1/PIX2/PIX3 swatch colors.
+
+ STRIKE M 97 CH and JDC 68 CH are implemented. PIXEL LINE IP is a
+ placeholder until its addressing is provided - picking it just shows a
+ "not set up yet" message.
+
+ PER-TYPE PIXEL ADDRESSING (user-confirmed, 2026-09-01) - see
+ FIXTURE_PROFILES below for the full detail:
+   STRIKE M 97 CH: nested fixtureNum.part.pixel, part 1 = RGB, part 2 = White
+   JDC 68 CH:      flat fixtureNum.pixel, no part number
+
+ -------------------------------------------------------------------
+ SAFETY
+ -------------------------------------------------------------------
+ - The target groups (PIX1/2/3 RGB/White Pixels) already exist and are
+   always overwritten (Store ... /o /nc), matching how this is done by
+   hand - there is no "already exists" confirmation, so double-check
+   the fixture number and chosen group before clicking.
+ - Not yet live-tested - check System Monitor on first run to confirm
+   the Fixture/Down/Grid sequence does what's expected before trusting
+   the Store step.
+=====================================================================
+]]--
+
 -- ===================================================================
--- Self-installing CG Media & Lites logo texture
+-- Self-installing CG Media & Lites logo + PIX1/2/3 color swatches
 -- ===================================================================
--- Same proven pipeline as GroupCleanupV4: raw file bytes embedded as
--- base64 below, written out under GetPath(Enums.PathType.Textures) the
--- first time this plugin runs on a given console/onPC, then registered as
--- a Texture object. Copying just this one .lua file anywhere is enough -
--- no separate manual texture copy needed per machine. Confirmed live on
--- both Mac and Windows onPC (GroupCleanupV4, 2026-09-01) including the
--- GetPath() no-trailing-slash gotcha, already accounted for below.
+-- Same proven pipeline as GroupCleanupV4/SaveShowAs2/SaveShowAs3: raw file
+-- bytes embedded as base64 below, written out under
+-- GetPath(Enums.PathType.Textures) the first time this plugin runs on a
+-- given console/onPC, then registered as a Texture object. Copying just
+-- this one .lua file anywhere is enough - no separate manual texture copy
+-- needed per machine. Own texture namespace (PixelGroupStore/...) so this
+-- plugin never depends on GroupCleanupV4/SaveShowAs2/3 being present.
+--
+-- Swatch colors reused verbatim from GroupCleanupV4's settled PIX1/PIX2/PIX3
+-- swatch images (same RGB, just re-embedded under this plugin's own file
+-- names) so the color coding matches across both plugins:
+--   PIX1 = (169,51,255) purple   PIX2 = (255,153,51) orange   PIX3 = (51,255,153) teal
+
+local LOGO_TEXTURE_NAME = 'PixelGroupStore_Logo'
+local LOGO_TEXTURE_FILE = 'PixelGroupStore/cg_logo.tga'
+
+local SWATCH_FILES = {
+    [1] = 'PixelGroupStore/swatch_pix1.tga',
+    [2] = 'PixelGroupStore/swatch_pix2.tga',
+    [3] = 'PixelGroupStore/swatch_pix3.tga',
+}
 
 local EMBEDDED_TEXTURES = {
-    ['SaveShowAs3/cg_logo.tga'] = (
+    ['PixelGroupStore/cg_logo.tga'] = (
+
         'AAAKAAAAAAAAAAAARwBAACAoBVVVqgOmp6mhYmJi8RwcHFAAAAABMzMzBbAAAAAABj8/PwQAAAACHh4eU2lqat+lp6pyAAAAAP///wKIAAAAAA' ..
         'OqqqoMioqL8DU1Nf8gICC7gQAAAAABVVVVAwAAAAGsAAAAAAEAAAABVVVVA4EAAAAABSAgIMdHR0f/kZGS6wAAABMBAQEAAAAAAYcAAAAABQAA' ..
         'AABBRERdIyMjtCEhIWo7PT1nR0dHMoEAAAAAAVVVVQMAAAABqAAAAAABAAAAAVVVVQOBAAAAAAdKSkopRUVIVCUlKGUmJibPOzs7hAAAAA4AAA' ..
@@ -189,6 +238,24 @@ local EMBEDDED_TEXTURES = {
         'bZZwRGyUbENskmpCao9nQWiMYjxjh1w9YINXOVl1UDdSbkomQWBCGThWOxcuSjcFHzQxABEjKwAAEycAAAAiAAAAHQAAABkAAAAUAAAAEAAAAA' ..
         'yCAAAAB4QAAAAA'
     ),
+    ['PixelGroupStore/swatch_pix1.tga'] = (
+
+        'AAAKAAAAAAAAAAAAIAAgACAon/8zqf+f/zOp/5//M6n/n/8zqf+f/zOp/5//M6n/n/8zqf+f/zOp/5//M6n/n/8zqf+f/zOp/5//M6n/n/8zqf' ..
+        '+f/zOp/5//M6n/n/8zqf+f/zOp/5//M6n/n/8zqf+f/zOp/5//M6n/n/8zqf+f/zOp/5//M6n/n/8zqf+f/zOp/5//M6n/n/8zqf+f/zOp/5//' ..
+        'M6n/n/8zqf+f/zOp/w=='
+    ),
+    ['PixelGroupStore/swatch_pix2.tga'] = (
+
+        'AAAKAAAAAAAAAAAAIAAgACAonzOZ//+fM5n//58zmf//nzOZ//+fM5n//58zmf//nzOZ//+fM5n//58zmf//nzOZ//+fM5n//58zmf//nzOZ//' ..
+        '+fM5n//58zmf//nzOZ//+fM5n//58zmf//nzOZ//+fM5n//58zmf//nzOZ//+fM5n//58zmf//nzOZ//+fM5n//58zmf//nzOZ//+fM5n//58z' ..
+        'mf//nzOZ//+fM5n//w=='
+    ),
+    ['PixelGroupStore/swatch_pix3.tga'] = (
+
+        'AAAKAAAAAAAAAAAAIAAgACAon5n/M/+fmf8z/5+Z/zP/n5n/M/+fmf8z/5+Z/zP/n5n/M/+fmf8z/5+Z/zP/n5n/M/+fmf8z/5+Z/zP/n5n/M/' ..
+        '+fmf8z/5+Z/zP/n5n/M/+fmf8z/5+Z/zP/n5n/M/+fmf8z/5+Z/zP/n5n/M/+fmf8z/5+Z/zP/n5n/M/+fmf8z/5+Z/zP/n5n/M/+fmf8z/5+Z' ..
+        '/zP/n5n/M/+fmf8z/w=='
+    ),
 }
 
 local B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -226,9 +293,7 @@ local function fileExists(path)
     return false
 end
 
--- mkdir syntax differs by platform (HostOS() confirmed working - see the
--- Carrot Industries IconList reference, which uses the same branching
--- pattern for pbcopy/clip/xclip).
+-- mkdir syntax differs by platform (HostOS() confirmed working elsewhere).
 local function ensureDirectory(dirPath)
     local okHost, host = pcall(HostOS)
     local cmd
@@ -240,20 +305,18 @@ local function ensureDirectory(dirPath)
     pcall(function() os.execute(cmd) end)
 end
 
--- Writes relativeFileName (e.g. 'SaveShowAs3/cg_logo.tga') under
--- GetPath(Enums.PathType.Textures) from EMBEDDED_TEXTURES if it isn't
--- already there. Idempotent - skips the write entirely once the file
--- exists, so this costs nothing on repeat runs. Every step is pcall-
--- wrapped and reported via Printf; never throws, only returns true/false.
+-- Writes relativeFileName under GetPath(Enums.PathType.Textures) from
+-- EMBEDDED_TEXTURES if it isn't already there. Idempotent. .fileName is
+-- always relative to GetPath(Enums.PathType.Textures), never prefixed with
+-- it - an absolute path there doubles up and fails to load (confirmed live
+-- on both Mac and Windows onPC in earlier plugins).
 local function ensureTextureFileOnDisk(relativeFileName)
     local okPath, texturesRoot = pcall(function() return GetPath(Enums.PathType.Textures) end)
     if not okPath or texturesRoot == nil then
-        Printf('SS3 asset debug: GetPath(Enums.PathType.Textures) failed err=%s', tostring(texturesRoot))
+        Printf('PGS asset debug: GetPath(Enums.PathType.Textures) failed err=%s', tostring(texturesRoot))
         return false
     end
 
-    -- GetPath(Enums.PathType.Textures) has no trailing slash (confirmed live
-    -- on both Mac and Windows onPC) - join it ourselves.
     local fullPath = texturesRoot .. '/' .. relativeFileName
     if fileExists(fullPath) then
         return true
@@ -266,37 +329,34 @@ local function ensureTextureFileOnDisk(relativeFileName)
 
     local data = EMBEDDED_TEXTURES[relativeFileName]
     if data == nil then
-        Printf('SS3 asset debug: no embedded data for %s', relativeFileName)
+        Printf('PGS asset debug: no embedded data for %s', relativeFileName)
         return false
     end
 
     local okDecode, decoded = pcall(base64Decode, data)
     if not okDecode or decoded == nil then
-        Printf('SS3 asset debug: base64Decode failed for %s err=%s', relativeFileName, tostring(decoded))
+        Printf('PGS asset debug: base64Decode failed for %s err=%s', relativeFileName, tostring(decoded))
         return false
     end
 
     local okOpen, f = pcall(io.open, fullPath, 'wb')
     if not okOpen or f == nil then
-        Printf('SS3 asset debug: could not open %s for writing', fullPath)
+        Printf('PGS asset debug: could not open %s for writing', fullPath)
         return false
     end
 
     f:write(decoded)
     f:close()
-    Printf('SS3 asset debug: wrote %s (%d bytes)', fullPath, #decoded)
+    Printf('PGS asset debug: wrote %s (%d bytes)', fullPath, #decoded)
     return true
 end
-
-local LOGO_TEXTURE_NAME = 'SaveShowAs3_Logo'
-local LOGO_TEXTURE_FILE = 'SaveShowAs3/cg_logo.tga'
 
 local function ensureTexture(textureName, fileName)
     ensureTextureFileOnDisk(fileName)
 
     local okTextures, textures = pcall(function() return Root().GraphicsRoot.TextureCollect.Textures end)
     if not okTextures or textures == nil then
-        Printf('SS3 texture debug: could not access TextureCollect.Textures ok=%s', tostring(okTextures))
+        Printf('PGS texture debug: could not access TextureCollect.Textures ok=%s', tostring(okTextures))
         return nil
     end
 
@@ -306,7 +366,7 @@ local function ensureTexture(textureName, fileName)
     if tex == nil then
         local okAppend, newTex = pcall(function() return textures:Append('Texture') end)
         if not okAppend or newTex == nil then
-            Printf('SS3 texture debug: textures:Append(Texture) failed for %s ok=%s val=%s', textureName, tostring(okAppend), tostring(newTex))
+            Printf('PGS texture debug: textures:Append(Texture) failed for %s ok=%s val=%s', textureName, tostring(okAppend), tostring(newTex))
             return nil
         end
         tex = newTex
@@ -317,7 +377,7 @@ local function ensureTexture(textureName, fileName)
         tex.fileName = fileName
     end)
     if not okSet then
-        Printf('SS3 texture debug: setting name/fileName failed for %s err=%s', textureName, tostring(setErr))
+        Printf('PGS texture debug: setting name/fileName failed for %s err=%s', textureName, tostring(setErr))
         return nil
     end
 
@@ -328,23 +388,34 @@ local function ensureLogoTexture()
     return ensureTexture(LOGO_TEXTURE_NAME, LOGO_TEXTURE_FILE)
 end
 
+local function ensureSwatchTexture(pixNum)
+    local textureName = 'PixelGroupStore_Swatch' .. tostring(pixNum)
+    local fileName = SWATCH_FILES[pixNum]
+    if fileName == nil then
+        return nil
+    end
+    return ensureTexture(textureName, fileName)
+end
+
 -- ===================================================================
--- Main
+-- Custom single-choice popup: CG-branded window with one colored (or
+-- plain) button per choice. Clicking a button immediately selects it
+-- and closes the window - no separate Apply step, same immediate-close
+-- pattern as SaveShowAs2/3's YES/NO buttons. Returns the chosen value,
+-- or nil if cancelled via the titlebar close button.
 -- ===================================================================
 
-local function Main(display_handle, arguments)
-    local baseName
+local pgsSignalCounter = 0
+
+local function choicePopup(display_handle, titleText, choices)
+    local chosenValue = nil
     local cancelled = false
-    local choice = nil
     local continue = false
 
-    -- Same custom window chrome as GroupCleanupV4 - BaseInput/TitleBar with
-    -- the CG logo/CloseButton/DialogFrame - instead of the stock PopupInput
-    -- YES/NO dialog.
     local baseInput = GetFocusDisplay().ScreenOverlay:Append('BaseInput')
-    baseInput.Name = 'SaveShowAs3Window'
+    baseInput.Name = 'PixelGroupStoreWindow'
     baseInput.H = 0
-    baseInput.W = 500
+    baseInput.W = 650
     baseInput.Columns = 1
     baseInput.Rows = 2
     baseInput[1][1].SizePolicy = 'Fixed'
@@ -362,7 +433,7 @@ local function Main(display_handle, arguments)
     titleBar.Texture = 'corner2'
 
     local titleBarIcon = titleBar:Append('TitleButton')
-    titleBarIcon.Text = 'Rename the show before saving?'
+    titleBarIcon.Text = titleText
     titleBarIcon.Texture = 'corner1'
     titleBarIcon.Anchors = '0,0'
     titleBarIcon.Icon = ensureLogoTexture() or 'star'
@@ -371,52 +442,49 @@ local function Main(display_handle, arguments)
     titleBarCloseButton.Anchors = '1,0'
     titleBarCloseButton.Texture = 'corner2'
     titleBarCloseButton.PluginComponent = my_handle
-    titleBarCloseButton.Clicked = 'SS_CloseClicked'
+    titleBarCloseButton.Clicked = 'PGS_CloseClicked'
 
     local dlgFrame = baseInput:Append('DialogFrame')
     dlgFrame.H = '100%'
     dlgFrame.W = '100%'
-    dlgFrame.Columns = 2
+    dlgFrame.Columns = 1
     dlgFrame.Rows = 1
     dlgFrame.Anchors = '0,1'
-    dlgFrame[1][1].SizePolicy = 'Fixed'
-    dlgFrame[1][1].Size = 100
-    dlgFrame[2][1].SizePolicy = 'Fixed'
-    dlgFrame[2][1].Size = 100
+    dlgFrame[1][1].SizePolicy = 'Stretch'
 
-    local yesButton = dlgFrame:Append('Button')
-    yesButton.Anchors = '0,0'
-    yesButton.Textshadow = 1
-    yesButton.HasHover = 'Yes'
-    yesButton.Text = 'YES'
-    yesButton.Font = 'Medium20'
-    yesButton.TextalignmentH = 'Centre'
-    yesButton.PluginComponent = my_handle
-    yesButton.Clicked = 'SS_YesClicked'
-
-    local noButton = dlgFrame:Append('Button')
-    noButton.Anchors = '1,0'
-    noButton.Textshadow = 1
-    noButton.HasHover = 'Yes'
-    noButton.Text = 'NO'
-    noButton.Font = 'Medium20'
-    noButton.TextalignmentH = 'Centre'
-    noButton.PluginComponent = my_handle
-    noButton.Clicked = 'SS_NoClicked'
-
-    signalTable.SS_YesClicked = function(caller)
-        GetFocusDisplay().ScreenOverlay:ClearUIChildren()
-        choice = 'YES'
-        continue = true
+    local buttonGrid = dlgFrame:Append('UILayoutGrid')
+    buttonGrid.Columns = 1
+    buttonGrid.Rows = #choices
+    buttonGrid.Anchors = '0,0'
+    for i = 1, #choices do
+        buttonGrid[1][i].SizePolicy = 'Fixed'
+        buttonGrid[1][i].Size = 50
     end
 
-    signalTable.SS_NoClicked = function(caller)
-        GetFocusDisplay().ScreenOverlay:ClearUIChildren()
-        choice = 'NO'
-        continue = true
+    for i, choice in ipairs(choices) do
+        local btn = buttonGrid:Append('Button')
+        btn.Anchors = { top = i - 1, bottom = i - 1, left = 0, right = 0 }
+        btn.Textshadow = 1
+        btn.HasHover = 'Yes'
+        btn.Text = choice.label
+        btn.Font = 'Medium20'
+        btn.TextalignmentH = 'Centre'
+        btn.PluginComponent = my_handle
+        if choice.swatchNum ~= nil then
+            btn.Texture = ensureSwatchTexture(choice.swatchNum)
+        end
+
+        pgsSignalCounter = pgsSignalCounter + 1
+        local signalName = 'PGS_ChoiceClicked_' .. pgsSignalCounter
+        btn.Clicked = signalName
+        signalTable[signalName] = function(caller)
+            GetFocusDisplay().ScreenOverlay:ClearUIChildren()
+            chosenValue = choice.value
+            continue = true
+        end
     end
 
-    signalTable.SS_CloseClicked = function(caller)
+    signalTable.PGS_CloseClicked = function(caller)
         GetFocusDisplay().ScreenOverlay:ClearUIChildren()
         cancelled = true
         continue = true
@@ -424,27 +492,232 @@ local function Main(display_handle, arguments)
 
     repeat until continue
 
-    if cancelled or choice == nil then
-        Printf("Save Show As 2: cancelled")
+    if cancelled then
+        return nil
+    end
+    return chosenValue
+end
+
+-- Pink-styled stand-in for Confirm() - Confirm() itself has no backColor
+-- param (confirmed elsewhere: it only ever shows fixed OK/Cancel with no
+-- theming hook), but stock MessageBox does, so a single-OK-button
+-- MessageBox with backColor = 'Window.Plugins' gives the same pink used
+-- everywhere else in this plugin for a plain info/error popup.
+local function pinkConfirm(title, message)
+    MessageBox({
+        icon = ensureLogoTexture() or 'object_smart',
+        backColor = 'Window.Plugins',
+        title = title,
+        message = message,
+        commands = { { value = 1, name = 'OK' } },
+    })
+end
+
+-- ===================================================================
+-- Config
+-- ===================================================================
+
+local FIXTURE_TYPES = {
+    { label = "PIXEL LINE IP", value = "PIXEL LINE IP" },
+    { label = "JDC 68 CH",    value = "JDC 68 CH" },
+    { label = "STRIKE M 97 CH", value = "STRIKE M 97 CH" },
+}
+
+local RGB_GROUPS = {
+    { label = "PIXEL1 RGB PIXELS GRID", value = "PIXEL1 RGB PIXELS GRID", swatchNum = 1 },
+    { label = "PIXEL2 RGB PIXELS GRID", value = "PIXEL2 RGB PIXELS GRID", swatchNum = 2 },
+    { label = "PIXEL3 RGB PIXELS GRID", value = "PIXEL3 RGB PIXELS GRID", swatchNum = 3 },
+}
+
+local WHITE_GROUPS = {
+    { label = "PIXEL1 WHITE PIXELS GRID", value = "PIXEL1 WHITE PIXELS GRID", swatchNum = 1 },
+    { label = "PIXEL2 WHITE PIXELS GRID", value = "PIXEL2 WHITE PIXELS GRID", swatchNum = 2 },
+    { label = "PIXEL3 WHITE PIXELS GRID", value = "PIXEL3 WHITE PIXELS GRID", swatchNum = 3 },
+}
+
+-- Per fixture-type, per-color "section" descriptor:
+--   prefix(fixtureNum)  -> address prefix before the final ".<pixel>"
+--   rows                -> ordered list of {startPixel, endPixel} - one
+--                          entry per grid row, in top-to-bottom order.
+--                          Ranges are a CLEAN split (no shared boundary
+--                          pixel between rows).
+--   colWidth             -> columns one fixture's row occupies, used to
+--                          space fixtures apart within a truss.
+--
+-- STRIKE M 97 CH (user-confirmed, 2026-09-01): nested part.pixel
+-- addressing, part 1 = RGB (14 pixels, split 7/7), part 2 = White (28
+-- pixels, split 14/14) - e.g. "401.1.1 Thru 7" / "401.1.8 Thru 14".
+--
+-- JDC 68 CH (user-confirmed, 2026-09-01): flat addressing, no part number -
+-- pixels 1-12 = RGB (split 6/6, e.g. "701.1 Thru 6" / "701.7 Thru 12"),
+-- pixels 13-24 = White, all in ONE row, no split (e.g. "701.13 Thru 24").
+local FIXTURE_PROFILES = {
+    ["STRIKE M 97 CH"] = {
+        rgb = {
+            prefix = function(n) return n .. ".1" end,
+            rows = { { 1, 7 }, { 8, 14 } },
+            colWidth = 7,
+        },
+        white = {
+            prefix = function(n) return n .. ".2" end,
+            rows = { { 1, 14 }, { 15, 28 } },
+            colWidth = 14,
+        },
+    },
+    ["JDC 68 CH"] = {
+        rgb = {
+            prefix = function(n) return n end,
+            rows = { { 1, 6 }, { 7, 12 } },
+            colWidth = 6,
+        },
+        white = {
+            prefix = function(n) return n end,
+            rows = { { 13, 24 } },
+            colWidth = 12,
+        },
+    },
+    -- PIXEL LINE IP not set up yet - no profile, Main() shows a "not set up"
+    -- message until the addressing details are provided.
+}
+
+-- Per-fixture command sequence, confirmed live 2026-09-01 via the console's
+-- own Command Line History as three SEPARATE commands (all OK) - a combined
+-- "Grid X/Y Fixture ... Thru ..." line reports OK but does NOT actually
+-- place the pixels, and "Please" combined with an explicit Thru range is
+-- "Not implemented". So every placement below is its own Cmd() call, one
+-- Grid + one Fixture pair per row in the section:
+--   Grid <col>/<rowTop + rowIndex>
+--   Fixture <prefix>.<startPixel> Thru <endPixel>
+local function arrangeFixture(section, fixtureNum, col, rowTop)
+    local prefix = section.prefix(fixtureNum)
+    for i, range in ipairs(section.rows) do
+        Cmd(string.format("Grid %d/%d", col, rowTop + i - 1))
+        Cmd(string.format("Fixture %s.%d Thru %d", prefix, range[1], range[2]))
+    end
+end
+
+-- Store uses /o (the target group always exists and should be overwritten)
+-- and /nc (plugins run off the UI thread, so a normal confirmation dialog
+-- can't render and would otherwise silently auto-cancel the command - see
+-- GroupCleanupV4 notes). One Store per section covering the whole
+-- selection, regardless of how many fixtures were just arranged.
+--
+-- Multi-fixture ranges (2026-09-01, UNTESTED beyond a single fixture at
+-- col 0): truss index = floor(fixture index / fixturesPerTruss) picks the
+-- row block (rowTop = truss * #section.rows), position-within-truss picks
+-- the column block (col = posInTruss * section.colWidth, wide enough that
+-- fixtures never overlap). Check the Selection Grid after the first
+-- multi-fixture run before trusting the Store step.
+local function arrangeAndStore(display_handle, fixtureList, fixturesPerTruss, section, groupChoices, popupTitle)
+    for i, fixtureNum in ipairs(fixtureList) do
+        local idx = i - 1
+        local truss = math.floor(idx / fixturesPerTruss)
+        local posInTruss = idx % fixturesPerTruss
+        local col = posInTruss * section.colWidth
+        local rowTop = truss * #section.rows
+        arrangeFixture(section, fixtureNum, col, rowTop)
+    end
+
+    local groupName = choicePopup(display_handle, popupTitle, groupChoices)
+    if groupName == nil then
+        Printf("PixelGroupStore: cancelled before storing")
+        return false
+    end
+
+    Cmd(string.format("Store Group '%s' /o /nc", groupName))
+    Printf("PixelGroupStore: stored %d fixture(s) into Group '%s'", #fixtureList, groupName)
+    return true
+end
+
+-- Parses "401" (single fixture) or "401 Thru 410" (inclusive range) into a
+-- list of fixture-number strings. Anything else returns nil.
+local function parseFixtureRange(input)
+    local a, b = input:match("^%s*(%d+)%s*[Tt][Hh][Rr][Uu]%s*(%d+)%s*$")
+    if a ~= nil and b ~= nil then
+        local startNum, endNum = tonumber(a), tonumber(b)
+        if startNum ~= nil and endNum ~= nil and startNum <= endNum then
+            local list = {}
+            for n = startNum, endNum do
+                table.insert(list, tostring(n))
+            end
+            return list
+        end
+        return nil
+    end
+
+    local single = input:match("^%s*(%d+)%s*$")
+    if single ~= nil then
+        return { single }
+    end
+
+    return nil
+end
+
+-- ===================================================================
+-- Main
+-- ===================================================================
+
+local function Main(display_handle, arguments)
+    local fixtureType = choicePopup(display_handle, "What strobey boi are we using today?", FIXTURE_TYPES)
+    if fixtureType == nil then
+        Printf("PixelGroupStore: cancelled")
         return
     end
 
-    if choice == "YES" then
-        local name = TextInput("Save Show As", "")
-        if name == nil or name == "" then
-            Printf("Save Show As 2: cancelled")
-            return
-        end
-        baseName = name
-    else
-        baseName = Root().ManetSocket.Showfile
-        baseName = baseName:gsub("_%d%d%d%d$", "")
+    local profile = FIXTURE_PROFILES[fixtureType]
+    if profile == nil then
+        pinkConfirm("PixelGroupStore", fixtureType .. " isn't set up yet.")
+        return
     end
 
-    local fullName = baseName .. "_" .. os.date("%H%M")
+    local fixtureInput = TextInput("Fixture number (e.g. 401 or 401 Thru 410)", "")
+    if fixtureInput == nil or fixtureInput == "" then
+        Printf("PixelGroupStore: cancelled")
+        return
+    end
 
-    Cmd(string.format("saveshow '%s' /nc", fullName))
-    Printf("Show saved as '%s'", fullName)
+    local fixtureList = parseFixtureRange(fixtureInput)
+    if fixtureList == nil or #fixtureList == 0 then
+        pinkConfirm("PixelGroupStore", "Couldn't understand '" .. fixtureInput .. "' - use a single number (401) or a range (401 Thru 410).")
+        return
+    end
+
+    local fixturesPerTruss = 1
+    if #fixtureList > 1 then
+        local perTrussInput = TextInput("Fixtures per truss", "")
+        local perTruss = perTrussInput ~= nil and tonumber(perTrussInput) or nil
+        if perTruss == nil or perTruss < 1 then
+            Printf("PixelGroupStore: cancelled")
+            return
+        end
+
+        local trussCountInput = TextInput("Number of trusses", "")
+        local trussCount = trussCountInput ~= nil and tonumber(trussCountInput) or nil
+        if trussCount == nil or trussCount < 1 then
+            Printf("PixelGroupStore: cancelled")
+            return
+        end
+
+        fixturesPerTruss = math.floor(perTruss)
+        if fixturesPerTruss * math.floor(trussCount) ~= #fixtureList then
+            Printf("PixelGroupStore: warning - %d fixture(s) selected but %d per truss x %d trusses = %d",
+                #fixtureList, fixturesPerTruss, math.floor(trussCount), fixturesPerTruss * math.floor(trussCount))
+        end
+    end
+
+    if not arrangeAndStore(display_handle, fixtureList, fixturesPerTruss, profile.rgb, RGB_GROUPS, "Store RGB pixels into which group?") then
+        return
+    end
+
+    if not arrangeAndStore(display_handle, fixtureList, fixturesPerTruss, profile.white, WHITE_GROUPS, "Store White pixels into which group?") then
+        return
+    end
+
+    -- Clear the programmer after the White store, same as pressing Clear
+    -- three times by hand.
+    Cmd("Clear")
+    Cmd("Clear")
+    Cmd("Clear")
 end
 
 return Main
