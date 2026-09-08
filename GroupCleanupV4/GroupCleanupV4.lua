@@ -511,128 +511,107 @@ local function ensureSwatchTexture(groupNum)
     return ensureTexture(textureName, fileName)
 end
 
+-- Creates (once) a real, persistent, custom-named ColorGroup with a pink
+-- Color entry, and returns its dot-path string ("GroupCleanupV4.Pink") for
+-- use as a MessageBox backColor. MessageBox.backColor only accepts a
+-- STRING theme-path reference (a raw Color object/handle silently does
+-- nothing, live-tested 2026-09-06 on PixelGroupStoreV2). Registers our
+-- own named group/color under ColorTheme.ColorGroups, the same technique
+-- the YLD LeftRight reference plugin uses.
+local function ensurePinkColorPath()
+    local groups = Root().ColorTheme.ColorGroups
+    local okGroup, group = pcall(function() return groups['GroupCleanupV4'] end)
+    if not (okGroup and group ~= nil) then
+        local okAppend, newGroup = pcall(function()
+            local g = groups:Append('ColorGroup')
+            g.Name = 'GroupCleanupV4'
+            return g
+        end)
+        if not (okAppend and newGroup ~= nil) then
+            Printf('GC pink debug: could not create GroupCleanupV4 ColorGroup ok=%s', tostring(okAppend))
+            return nil
+        end
+        group = newGroup
+    end
+
+    local okColor, color = pcall(function() return group['Pink'] end)
+    if not (okColor and color ~= nil) then
+        local okAppend, newColor = pcall(function()
+            local c = group:Append('Color')
+            c.Name = 'Pink'
+            return c
+        end)
+        if not (okAppend and newColor ~= nil) then
+            Printf('GC pink debug: could not create Pink Color entry ok=%s', tostring(okAppend))
+            return nil
+        end
+        color = newColor
+    end
+
+    local okSet, setErr = pcall(function() color.RGBA = 'E628A0FF' end)
+    Printf('GC pink debug: set RGBA ok=%s err=%s', tostring(okSet), tostring(setErr))
+
+    return 'GroupCleanupV4.Pink'
+end
+
+-- Pink-styled stand-ins for Confirm() - Confirm() itself has no backColor
+-- param at all (fixed OK/Cancel, no theming hook), but stock MessageBox
+-- does. pinkConfirmYesNo mirrors a real Yes/No decision (returns a
+-- boolean); pinkInfo mirrors an OK-only info alert (no return value).
+local function pinkConfirmYesNo(title, message)
+    local result = MessageBox({
+        icon = ensureLogoTexture() or 'object_smart',
+        backColor = ensurePinkColorPath() or 'Window.Plugins',
+        title = title,
+        message = message,
+        commands = { { value = 1, name = 'YES' }, { value = 0, name = 'NO' } },
+    })
+    return result ~= nil and result.result == 1
+end
+
+local function pinkInfo(title, message)
+    MessageBox({
+        icon = ensureLogoTexture() or 'object_smart',
+        backColor = ensurePinkColorPath() or 'Window.Plugins',
+        title = title,
+        message = message,
+        commands = { { value = 1, name = 'OK' } },
+    })
+end
+
 -- Custom window with a real checkbox per group, colored by that
 -- group's own Appearance. Returns a sorted array of selected group
 -- numbers, or nil if cancelled (closed via the X).
+-- Plain MessageBox, same style as every other prompt in this plugin - the
+-- custom hand-built pink header belongs ONLY to PixelGroupStoreV2's two
+-- swatch-color group-selection popups, nowhere else. MessageBox supports
+-- real checkboxes via `states` (confirmed, documented from earlier plugin
+-- work), so no custom window is needed here at all.
 local function selectGroupsPopup(display_handle)
-    local Element = {}
-    local CheckboxState = {}
-    local cancelled = false
-    local continue = false
-
-    local baseInput = GetFocusDisplay().ScreenOverlay:Append('BaseInput')
-    baseInput.Name = 'GroupCleanupWindow'
-    baseInput.H = 0
-    baseInput.W = 500
-    baseInput.Columns = 1
-    baseInput.Rows = 2
-    baseInput[1][1].SizePolicy = 'Fixed'
-    baseInput[1][1].Size = 60
-    baseInput[1][2].SizePolicy = 'Stretch'
-    baseInput.AutoClose = 'No'
-    baseInput.CloseOnEscape = 'Yes'
-
-    local titleBar = baseInput:Append('TitleBar')
-    titleBar.Columns = 2
-    titleBar.Rows = 1
-    titleBar.Anchors = '0,0'
-    titleBar[2][2].SizePolicy = 'Fixed'
-    titleBar[2][2].Size = 50
-    titleBar.Texture = 'corner2'
-
-    local titleBarIcon = titleBar:Append('TitleButton')
-    titleBarIcon.Text = 'Select groups in use toniiight'
-    titleBarIcon.Texture = 'corner1'
-    titleBarIcon.Anchors = '0,0'
-    titleBarIcon.Icon = ensureLogoTexture() or 'star'
-
-    local titleBarCloseButton = titleBar:Append('CloseButton')
-    titleBarCloseButton.Anchors = '1,0'
-    titleBarCloseButton.Texture = 'corner2'
-    titleBarCloseButton.PluginComponent = my_handle
-    titleBarCloseButton.Clicked = 'GC_CloseClicked'
-
-    local dlgFrame = baseInput:Append('DialogFrame')
-    dlgFrame.H = '100%'
-    dlgFrame.W = '100%'
-    dlgFrame.Columns = 1
-    dlgFrame.Rows = 2
-    dlgFrame.Anchors = '0,1'
-    dlgFrame[1][1].SizePolicy = 'Stretch'
-    dlgFrame[1][2].SizePolicy = 'Fixed'
-    dlgFrame[1][2].Size = 60
-
-    local checkBoxGrid = dlgFrame:Append('UILayoutGrid')
-    checkBoxGrid.Columns = 1
-    checkBoxGrid.Rows = 6
-    checkBoxGrid.Anchors = '0,0'
-    checkBoxGrid.Margin = '0,5'
+    local stateNames = {}
+    local states = {}
     for i = 1, 6 do
-        checkBoxGrid[1][i].SizePolicy = 'Fixed'
-        checkBoxGrid[1][i].Size = 40
+        local name = string.format('%d - %s', i, GROUP_NAMES[i])
+        stateNames[i] = name
+        table.insert(states, { name = name, state = false })
     end
 
-    for i = 1, 6 do
-        CheckboxState[i] = 0
+    local result = MessageBox({
+        icon = ensureLogoTexture() or 'object_smart',
+        backColor = ensurePinkColorPath() or 'Window.Plugins',
+        title = 'Group Cleanup V4',
+        message = 'Select groups in use tonight:',
+        commands = { { value = 1, name = 'Apply' }, { value = 0, name = 'Cancel' } },
+        states = states,
+    })
 
-        Element[i] = checkBoxGrid:Append('CheckBox')
-        Element[i].Anchors = { top = i - 1, bottom = i - 1, left = 0, right = 0 }
-        Element[i].Text = string.format('%d - %s', i, GROUP_NAMES[i])
-        Element[i].TextalignmentH = 'Left'
-        Element[i].State = 0
-        Element[i].PluginComponent = my_handle
-        Element[i].Clicked = 'GC_CheckBoxClicked'
-        -- Whole-row background fill via .Texture (same property TitleBar uses
-        -- for 'corner1'/'corner2') rather than a separate small .Icon swatch -
-        -- .Texture is expected to stretch/tile to fill the element, unlike
-        -- .Icon which renders near native pixel size.
-        Element[i].Texture = ensureSwatchTexture(i)
-    end
-
-    local buttonGrid = dlgFrame:Append('UILayoutGrid')
-    buttonGrid.Columns = 1
-    buttonGrid.Rows = 1
-    buttonGrid.Anchors = '0,1'
-
-    local applyButton = buttonGrid:Append('Button')
-    applyButton.Anchors = '0,0'
-    applyButton.Textshadow = 1
-    applyButton.HasHover = 'Yes'
-    applyButton.Text = 'Apply'
-    applyButton.Font = 'Medium20'
-    applyButton.TextalignmentH = 'Centre'
-    applyButton.PluginComponent = my_handle
-    applyButton.Clicked = 'GC_ApplyClicked'
-
-    signalTable.GC_CheckBoxClicked = function(caller)
-        if caller.State == 1 then caller.State = 0 else caller.State = 1 end
-        for i = 1, 6 do
-            if Element[i] ~= nil then
-                CheckboxState[i] = Element[i].State
-            end
-        end
-    end
-
-    signalTable.GC_ApplyClicked = function(caller)
-        GetFocusDisplay().ScreenOverlay:ClearUIChildren()
-        continue = true
-    end
-
-    signalTable.GC_CloseClicked = function(caller)
-        GetFocusDisplay().ScreenOverlay:ClearUIChildren()
-        cancelled = true
-        continue = true
-    end
-
-    repeat until continue
-
-    if cancelled then
+    if result == nil or result.result == nil or result.result == 0 then
         return nil
     end
 
     local keepGroups = {}
     for i = 1, 6 do
-        if CheckboxState[i] == 1 then
+        if result.states ~= nil and result.states[stateNames[i]] then
             table.insert(keepGroups, i)
         end
     end
@@ -655,7 +634,7 @@ local function Main(display_handle, arguments)
     end
 
     if #keepGroups == 0 then
-        local proceedAnyway = Confirm("Group Cleanup V4",
+        local proceedAnyway = pinkConfirmYesNo("Group Cleanup V4",
             "No groups selected - this will clear ALL 6 groups. Continue?")
         if not proceedAnyway then
             Printf("Group Cleanup V4: cancelled - no groups selected.")
@@ -672,7 +651,7 @@ local function Main(display_handle, arguments)
     end
 
     if #removeGroups == 0 then
-        Confirm("Group Cleanup V4", "All 6 groups are in use tonight - nothing to remove.", nil, false)
+        pinkInfo("Group Cleanup V4", "All 6 groups are in use tonight - nothing to remove.")
         Printf("Group Cleanup V4: all 6 groups kept, nothing to do.")
         return
     end
@@ -681,7 +660,7 @@ local function Main(display_handle, arguments)
     local msg = "Keeping:  " .. groupNamesList(keepGroups) .. "\n" ..
                 "Removing: " .. groupNamesList(removeGroups) .. "\n\n" ..
                 "Clear these groups from the punt page now?"
-    local confirmed = Confirm("Group Cleanup V4", msg)
+    local confirmed = pinkConfirmYesNo("Group Cleanup V4", msg)
     if not confirmed then
         Printf("Group Cleanup V4: cancelled at confirmation.")
         return
@@ -718,10 +697,10 @@ local function Main(display_handle, arguments)
     end
 
     if DRY_RUN then
-        Confirm("Group Cleanup V4",
-            "DRY RUN only - nothing was changed.\nCheck the command line feedback for what would have run.", nil, false)
+        pinkInfo("Group Cleanup V4",
+            "DRY RUN only - nothing was changed.\nCheck the command line feedback for what would have run.")
     else
-        Confirm("Group Cleanup V4", "Done.", nil, false)
+        pinkInfo("Group Cleanup V4", "Done.")
     end
 
     Printf("---- Group Cleanup V4: finished ----")

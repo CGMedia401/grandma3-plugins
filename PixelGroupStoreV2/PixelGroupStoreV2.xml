@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <UserPlugin Name="Pixel Group Store V2" Version="0.0.0.0" Path="/PixelGroupStoreV2">
+        <ComponentLua Name="PixelGroupStoreV2" FileName="PixelGroupStoreV2.lua" />
+    </UserPlugin>
+</GMA3>

@@ -15,14 +15,15 @@ local my_handle      = select(4,...);
  and stores each selection into whichever of the three PIXEL groups you
  pick, color-coded to match GroupCleanupV4's PIX1/PIX2/PIX3 swatch colors.
 
- STRIKE M 97 CH and JDC 68 CH are implemented. PIXEL LINE IP is a
- placeholder until its addressing is provided - picking it just shows a
- "not set up yet" message.
+ STRIKE M 97 CH, JDC 68 CH, and PIXEL LINE IP (33 CH / 117 CH modes) are
+ all implemented.
 
- PER-TYPE PIXEL ADDRESSING (user-confirmed, 2026-09-01) - see
+ PER-TYPE PIXEL ADDRESSING (user-confirmed, 2026-09-01/2026-09-05) - see
  FIXTURE_PROFILES below for the full detail:
    STRIKE M 97 CH: nested fixtureNum.part.pixel, part 1 = RGB, part 2 = White
    JDC 68 CH:      flat fixtureNum.pixel, no part number
+   PIXEL LINE IP:  flat fixtureNum.pixel, no part number - a second popup
+                   picks 33 CH or 117 CH mode before the profile is looked up
 
  -------------------------------------------------------------------
  SAFETY
@@ -405,15 +406,98 @@ end
 -- or nil if cancelled via the titlebar close button.
 -- ===================================================================
 
-local pgsSignalCounter = 0
+-- Creates (once) a real, persistent, custom-named ColorGroup with a pink
+-- Color entry, and returns its dot-path string ("PixelGroupStore.Pink")
+-- for use as a backColor - works for MessageBox's backColor field AND
+-- for BaseInput.BackColor (both take a STRING theme-path reference; a raw
+-- Color object/handle silently does nothing on MessageBox, live-tested
+-- 2026-09-06). Registers our own named group/color under
+-- ColorTheme.ColorGroups, the same technique the YLD LeftRight reference
+-- plugin uses, so the string path points at a color we actually control
+-- instead of hoping an existing theme slot happens to be pink. NOTE:
+-- TitleBar specifically never renders backColor under any technique
+-- (conclusively confirmed via 8 live attempts) - this colors the window
+-- BODY, not the titlebar strip.
+local function ensurePinkColorPath()
+    local groups = Root().ColorTheme.ColorGroups
+    local okGroup, group = pcall(function() return groups['PixelGroupStore'] end)
+    if not (okGroup and group ~= nil) then
+        local okAppend, newGroup = pcall(function()
+            local g = groups:Append('ColorGroup')
+            g.Name = 'PixelGroupStore'
+            return g
+        end)
+        if not (okAppend and newGroup ~= nil) then
+            Printf('PGS pink debug: could not create PixelGroupStore ColorGroup ok=%s', tostring(okAppend))
+            return nil
+        end
+        group = newGroup
+    end
 
+    local okColor, color = pcall(function() return group['Pink'] end)
+    if not (okColor and color ~= nil) then
+        local okAppend, newColor = pcall(function()
+            local c = group:Append('Color')
+            c.Name = 'Pink'
+            return c
+        end)
+        if not (okAppend and newColor ~= nil) then
+            Printf('PGS pink debug: could not create Pink Color entry ok=%s', tostring(okAppend))
+            return nil
+        end
+        color = newColor
+    end
+
+    local okSet, setErr = pcall(function() color.RGBA = 'E628A0FF' end)
+    Printf('PGS pink debug: set RGBA ok=%s err=%s', tostring(okSet), tostring(setErr))
+
+    return 'PixelGroupStore.Pink'
+end
+
+-- Same MessageBox pattern as pinkConfirm - genuinely pink (title through
+-- body, one continuous MessageBox render, not a hand-composed BaseInput/
+-- TitleBar window) since MessageBox is a single native dialog type that
+-- actually honors backColor end-to-end. commands holds one button per
+-- choice (value = its index into `choices`) plus a Cancel button.
 local function choicePopup(display_handle, titleText, choices)
+    local commands = {}
+    for i, choice in ipairs(choices) do
+        table.insert(commands, { value = i, name = choice.label })
+    end
+    table.insert(commands, { value = 0, name = 'Cancel' })
+
+    local result = MessageBox({
+        icon = ensureLogoTexture() or 'object_smart',
+        backColor = ensurePinkColorPath() or 'Window.Plugins',
+        title = titleText,
+        message = 'Choose one:',
+        commands = commands,
+    })
+
+    if result == nil or result.result == nil or result.result == 0 then
+        return nil
+    end
+    return choices[result.result].value
+end
+
+-- Custom window for the RGB/White group-selection popup specifically -
+-- the only place this plugin uses per-choice swatch textures (PIX1/2/3
+-- color-coding), which plain MessageBox can't do (one backColor for the
+-- whole box, no per-button styling). Pink header is a single full-width
+-- Button (not a 2-column split) - an earlier attempt splitting the header
+-- into a title cell + close-button cell had a column-sizing bug (the
+-- close button ate almost the whole width instead of staying small), so
+-- this sidesteps that entirely by not splitting the header at all; Cancel
+-- is appended as an extra row in the choice list below instead of a
+-- separate titlebar close icon.
+local function swatchGroupPopup(display_handle, titleText, choices)
     local chosenValue = nil
     local cancelled = false
     local continue = false
+    local pinkPath = ensurePinkColorPath() or 'Window.Plugins'
 
     local baseInput = GetFocusDisplay().ScreenOverlay:Append('BaseInput')
-    baseInput.Name = 'PixelGroupStoreWindow'
+    baseInput.Name = 'PixelGroupStoreSwatchWindow'
     baseInput.H = 0
     baseInput.W = 650
     baseInput.Columns = 1
@@ -424,25 +508,30 @@ local function choicePopup(display_handle, titleText, choices)
     baseInput.AutoClose = 'No'
     baseInput.CloseOnEscape = 'Yes'
 
-    local titleBar = baseInput:Append('TitleBar')
-    titleBar.Columns = 2
-    titleBar.Rows = 1
-    titleBar.Anchors = '0,0'
-    titleBar[2][2].SizePolicy = 'Fixed'
-    titleBar[2][2].Size = 50
-    titleBar.Texture = 'corner2'
+    -- A plain Button as a DIRECT child of BaseInput collapsed to zero
+    -- height even with explicit H/W='100%' - matching the established
+    -- rule that only container classes (DialogFrame, UILayoutGrid,
+    -- TitleBar) behave correctly as direct BaseInput children. Wrapping
+    -- the Button in its own single-cell UILayoutGrid (same nesting shape
+    -- as the working swatch buttonGrid below) fixes it.
+    local headerGrid = baseInput:Append('UILayoutGrid')
+    headerGrid.Columns = 1
+    headerGrid.Rows = 1
+    headerGrid.Anchors = '0,0'
+    headerGrid[1][1].SizePolicy = 'Stretch'
 
-    local titleBarIcon = titleBar:Append('TitleButton')
-    titleBarIcon.Text = titleText
-    titleBarIcon.Texture = 'corner1'
-    titleBarIcon.Anchors = '0,0'
-    titleBarIcon.Icon = ensureLogoTexture() or 'star'
-
-    local titleBarCloseButton = titleBar:Append('CloseButton')
-    titleBarCloseButton.Anchors = '1,0'
-    titleBarCloseButton.Texture = 'corner2'
-    titleBarCloseButton.PluginComponent = my_handle
-    titleBarCloseButton.Clicked = 'PGS_CloseClicked'
+    local header = headerGrid:Append('Button')
+    header.Anchors = '0,0'
+    header.Text = titleText
+    header.Icon = ensureLogoTexture() or 'star'
+    header.IconAlignmentH = 'Left'
+    header.IconAlignmentV = 'Centre'
+    header.BackColor = pinkPath
+    header.Font = 'Medium20'
+    header.TextalignmentH = 'Left'
+    header.TextOffsetH = 40
+    header.HasHover = 'No'
+    header.Textshadow = 1
 
     local dlgFrame = baseInput:Append('DialogFrame')
     dlgFrame.H = '100%'
@@ -452,16 +541,23 @@ local function choicePopup(display_handle, titleText, choices)
     dlgFrame.Anchors = '0,1'
     dlgFrame[1][1].SizePolicy = 'Stretch'
 
+    local allChoices = {}
+    for _, c in ipairs(choices) do
+        table.insert(allChoices, c)
+    end
+    table.insert(allChoices, { label = 'Cancel', isCancel = true })
+
     local buttonGrid = dlgFrame:Append('UILayoutGrid')
     buttonGrid.Columns = 1
-    buttonGrid.Rows = #choices
+    buttonGrid.Rows = #allChoices
     buttonGrid.Anchors = '0,0'
-    for i = 1, #choices do
+    for i = 1, #allChoices do
         buttonGrid[1][i].SizePolicy = 'Fixed'
         buttonGrid[1][i].Size = 50
     end
 
-    for i, choice in ipairs(choices) do
+    local signalCounter = 0
+    for i, choice in ipairs(allChoices) do
         local btn = buttonGrid:Append('Button')
         btn.Anchors = { top = i - 1, bottom = i - 1, left = 0, right = 0 }
         btn.Textshadow = 1
@@ -474,20 +570,18 @@ local function choicePopup(display_handle, titleText, choices)
             btn.Texture = ensureSwatchTexture(choice.swatchNum)
         end
 
-        pgsSignalCounter = pgsSignalCounter + 1
-        local signalName = 'PGS_ChoiceClicked_' .. pgsSignalCounter
+        signalCounter = signalCounter + 1
+        local signalName = 'PGS_SwatchChoiceClicked_' .. signalCounter
         btn.Clicked = signalName
         signalTable[signalName] = function(caller)
             GetFocusDisplay().ScreenOverlay:ClearUIChildren()
-            chosenValue = choice.value
+            if choice.isCancel then
+                cancelled = true
+            else
+                chosenValue = choice.value
+            end
             continue = true
         end
-    end
-
-    signalTable.PGS_CloseClicked = function(caller)
-        GetFocusDisplay().ScreenOverlay:ClearUIChildren()
-        cancelled = true
-        continue = true
     end
 
     repeat until continue
@@ -500,13 +594,13 @@ end
 
 -- Pink-styled stand-in for Confirm() - Confirm() itself has no backColor
 -- param (confirmed elsewhere: it only ever shows fixed OK/Cancel with no
--- theming hook), but stock MessageBox does, so a single-OK-button
--- MessageBox with backColor = 'Window.Plugins' gives the same pink used
--- everywhere else in this plugin for a plain info/error popup.
+-- theming hook), but stock MessageBox does.
 local function pinkConfirm(title, message)
+    local pinkPath = ensurePinkColorPath()
+
     MessageBox({
         icon = ensureLogoTexture() or 'object_smart',
-        backColor = 'Window.Plugins',
+        backColor = pinkPath or 'Window.Plugins',
         title = title,
         message = message,
         commands = { { value = 1, name = 'OK' } },
@@ -519,20 +613,54 @@ end
 
 local FIXTURE_TYPES = {
     { label = "PIXEL LINE IP", value = "PIXEL LINE IP" },
-    { label = "JDC 68 CH",    value = "JDC 68 CH" },
-    { label = "STRIKE M 97 CH", value = "STRIKE M 97 CH" },
+    { label = "JDC", value = "JDC" },
+    { label = "STRIKE M", value = "STRIKE M" },
 }
+
+local PIXEL_LINE_MODES = {
+    { label = "MODE 7 - 33 CH", value = "PIXEL LINE IP 33CH" },
+    { label = "MODE 10 - 117 CH", value = "PIXEL LINE IP 117CH" },
+}
+
+local STRIKE_M_MODES = {
+    { label = "97 CH", value = "STRIKE M 97CH" },
+    { label = "96 CH", value = "STRIKE M 96CH" },
+    { label = "74 CH", value = "STRIKE M 74CH" },
+    { label = "68 CH", value = "STRIKE M 68CH" },
+    { label = "30 CH", value = "STRIKE M 30CH" },
+}
+
+local JDC_MODES = {
+    { label = "Mode 3 68 CH SPix", value = "JDC MODE3 68CH" },
+    { label = "Mode 2 23 CH Normal", value = "JDC MODE2 23CH" },
+}
+
+-- Maps a FIXTURE_TYPES value to its mode-choice popup, if it has one - used
+-- generically in Main() so adding a new fixture type's mode split doesn't
+-- need a new special-cased if-block.
+local FIXTURE_MODE_CHOICES = {
+    ["PIXEL LINE IP"] = PIXEL_LINE_MODES,
+    ["STRIKE M"] = STRIKE_M_MODES,
+    ["JDC"] = JDC_MODES,
+}
+
+-- "CUSTOM" is handled specially right after the group popup returns - it
+-- prompts a TextInput for a pool name/number instead of using this value
+-- directly as the Store target.
+local CUSTOM_GROUP_CHOICE = { label = "CUSTOM", value = "CUSTOM" }
 
 local RGB_GROUPS = {
     { label = "PIXEL1 RGB PIXELS GRID", value = "PIXEL1 RGB PIXELS GRID", swatchNum = 1 },
     { label = "PIXEL2 RGB PIXELS GRID", value = "PIXEL2 RGB PIXELS GRID", swatchNum = 2 },
     { label = "PIXEL3 RGB PIXELS GRID", value = "PIXEL3 RGB PIXELS GRID", swatchNum = 3 },
+    CUSTOM_GROUP_CHOICE,
 }
 
 local WHITE_GROUPS = {
     { label = "PIXEL1 WHITE PIXELS GRID", value = "PIXEL1 WHITE PIXELS GRID", swatchNum = 1 },
     { label = "PIXEL2 WHITE PIXELS GRID", value = "PIXEL2 WHITE PIXELS GRID", swatchNum = 2 },
     { label = "PIXEL3 WHITE PIXELS GRID", value = "PIXEL3 WHITE PIXELS GRID", swatchNum = 3 },
+    CUSTOM_GROUP_CHOICE,
 }
 
 -- Per fixture-type, per-color "section" descriptor:
@@ -547,12 +675,24 @@ local WHITE_GROUPS = {
 -- STRIKE M 97 CH (user-confirmed, 2026-09-01): nested part.pixel
 -- addressing, part 1 = RGB (14 pixels, split 7/7), part 2 = White (28
 -- pixels, split 14/14) - e.g. "401.1.1 Thru 7" / "401.1.8 Thru 14".
+-- STRIKE M 68 CH: NOT SET UP YET - addressing not provided. Picking it
+-- shows a "not set up yet" message until FIXTURE_PROFILES gets an entry.
 --
--- JDC 68 CH (user-confirmed, 2026-09-01): flat addressing, no part number -
--- pixels 1-12 = RGB (split 6/6, e.g. "701.1 Thru 6" / "701.7 Thru 12"),
--- pixels 13-24 = White, all in ONE row, no split (e.g. "701.13 Thru 24").
+-- JDC MODE3 68CH SPix (user-confirmed, 2026-09-01, as "JDC 68 CH"): flat
+-- addressing, no part number - pixels 1-12 = RGB (split 6/6, e.g.
+-- "701.1 Thru 6" / "701.7 Thru 12"), pixels 13-24 = White, all in ONE row,
+-- no split (e.g. "701.13 Thru 24").
+-- JDC MODE2 23CH Normal: NOT SET UP YET - flat addressing confirmed, but
+-- pixel counts/split not provided. Picking it shows "not set up yet".
+--
+-- orientationCheck = true enables the RGB confirm/invert flow (highlight +
+-- CORRECT/INVERT popup). As of 2026-09-05, only enabled for STRIKE M 97CH,
+-- JDC MODE3 68CH, and PIXEL LINE IP 117CH - PIXEL LINE IP 33CH stays plain
+-- arrange+store, no confirm popup, no invert, same as before this feature
+-- existed.
 local FIXTURE_PROFILES = {
-    ["STRIKE M 97 CH"] = {
+    ["STRIKE M 97CH"] = {
+        orientationCheck = true,
         rgb = {
             prefix = function(n) return n .. ".1" end,
             rows = { { 1, 7 }, { 8, 14 } },
@@ -564,7 +704,56 @@ local FIXTURE_PROFILES = {
             colWidth = 14,
         },
     },
-    ["JDC 68 CH"] = {
+    -- STRIKE M 96CH (user-confirmed, 2026-09-08): same addressing/layout
+    -- as 97CH, just a different channel-mode name on the fixture.
+    ["STRIKE M 96CH"] = {
+        orientationCheck = true,
+        rgb = {
+            prefix = function(n) return n .. ".1" end,
+            rows = { { 1, 7 }, { 8, 14 } },
+            colWidth = 7,
+        },
+        white = {
+            prefix = function(n) return n .. ".2" end,
+            rows = { { 1, 14 }, { 15, 28 } },
+            colWidth = 14,
+        },
+    },
+    -- STRIKE M 74CH (user-confirmed, 2026-09-08): same addressing/layout
+    -- as 97CH/96CH, just a different channel-mode name on the fixture.
+    ["STRIKE M 74CH"] = {
+        orientationCheck = true,
+        rgb = {
+            prefix = function(n) return n .. ".1" end,
+            rows = { { 1, 7 }, { 8, 14 } },
+            colWidth = 7,
+        },
+        white = {
+            prefix = function(n) return n .. ".2" end,
+            rows = { { 1, 14 }, { 15, 28 } },
+            colWidth = 14,
+        },
+    },
+    -- STRIKE M 30CH (user-confirmed, 2026-09-08): nested part.pixel
+    -- addressing like the others, but different pixel counts and no
+    -- row split - RGB = part 1, pixels 1-7, one row. White = part 2,
+    -- pixels 1-14, one row.
+    ["STRIKE M 30CH"] = {
+        orientationCheck = true,
+        rgb = {
+            prefix = function(n) return n .. ".1" end,
+            rows = { { 1, 7 } },
+            colWidth = 7,
+        },
+        white = {
+            prefix = function(n) return n .. ".2" end,
+            rows = { { 1, 14 } },
+            colWidth = 14,
+        },
+    },
+    -- STRIKE M 68CH not set up yet - no profile.
+    ["JDC MODE3 68CH"] = {
+        orientationCheck = true,
         rgb = {
             prefix = function(n) return n end,
             rows = { { 1, 6 }, { 7, 12 } },
@@ -576,8 +765,36 @@ local FIXTURE_PROFILES = {
             colWidth = 12,
         },
     },
-    -- PIXEL LINE IP not set up yet - no profile, Main() shows a "not set up"
-    -- message until the addressing details are provided.
+    -- JDC MODE2 23CH not set up yet - no profile.
+    -- PIXEL LINE IP (user-confirmed, 2026-09-05): flat fixtureNum.pixel
+    -- addressing, no part number, same shape as JDC - just two selectable
+    -- modes instead of one. Main() shows a second popup (PIXEL_LINE_MODES)
+    -- to pick which of these two keys to look up.
+    ["PIXEL LINE IP 33CH"] = {
+        rgb = {
+            prefix = function(n) return n end,
+            rows = { { 1, 8 } },
+            colWidth = 8,
+        },
+        white = {
+            prefix = function(n) return n end,
+            rows = { { 9, 16 } },
+            colWidth = 8,
+        },
+    },
+    ["PIXEL LINE IP 117CH"] = {
+        orientationCheck = true,
+        rgb = {
+            prefix = function(n) return n end,
+            rows = { { 1, 16 }, { 17, 32 } },
+            colWidth = 16,
+        },
+        white = {
+            prefix = function(n) return n end,
+            rows = { { 33, 48 } },
+            colWidth = 16,
+        },
+    },
 }
 
 -- Per-fixture command sequence, confirmed live 2026-09-01 via the console's
@@ -596,6 +813,45 @@ local function arrangeFixture(section, fixtureNum, col, rowTop)
     end
 end
 
+-- Sets one address (a single pixel, or a Thru range covering several) to
+-- full dimmer + a solid color - used right before a Store to visually
+-- confirm which physical end is pixel 1 vs the last pixel on the real
+-- fixture. Selection and each attribute set are kept as separate
+-- Cmd() calls, matching arrangeFixture's Grid/Fixture split above (a
+-- combined line has silently no-opped elsewhere in this codebase).
+-- ATTRIBUTE NAME UNVERIFIED: "ColorRGB_R/_G/_B" is the only real-world
+-- example on file (a third-party reference plugin) - depends on how these
+-- fixture types are actually patched, check System Monitor on first run
+-- and adjust if it doesn't tint the pixel.
+local function highlightPixel(addr, r, g, b)
+    Cmd(string.format('Fixture %s', addr))
+    Cmd('At Full')
+    Cmd(string.format('Attribute "ColorRGB_R" At %d', r))
+    Cmd(string.format('Attribute "ColorRGB_G" At %d', g))
+    Cmd(string.format('Attribute "ColorRGB_B" At %d', b))
+end
+
+-- col/rowTop placement math shared between the initial arrangement and an
+-- inverted re-arrangement - factored out so both stay in sync.
+local function forEachFixturePlacement(fixtureList, fixturesPerTruss, section, callback)
+    for i, fixtureNum in ipairs(fixtureList) do
+        local idx = i - 1
+        local truss = math.floor(idx / fixturesPerTruss)
+        local posInTruss = idx % fixturesPerTruss
+        local col = posInTruss * section.colWidth
+        local rowTop = truss * #section.rows
+        callback(fixtureNum, col, rowTop)
+    end
+end
+
+local function reversedList(list)
+    local reversed = {}
+    for i = #list, 1, -1 do
+        table.insert(reversed, list[i])
+    end
+    return reversed
+end
+
 -- Store uses /o (the target group always exists and should be overwritten)
 -- and /nc (plugins run off the UI thread, so a normal confirmation dialog
 -- can't render and would otherwise silently auto-cancel the command - see
@@ -608,25 +864,139 @@ end
 -- the column block (col = posInTruss * section.colWidth, wide enough that
 -- fixtures never overlap). Check the Selection Grid after the first
 -- multi-fixture run before trusting the Store step.
-local function arrangeAndStore(display_handle, fixtureList, fixturesPerTruss, section, groupChoices, popupTitle)
-    for i, fixtureNum in ipairs(fixtureList) do
-        local idx = i - 1
-        local truss = math.floor(idx / fixturesPerTruss)
-        local posInTruss = idx % fixturesPerTruss
-        local col = posInTruss * section.colWidth
-        local rowTop = truss * #section.rows
-        arrangeFixture(section, fixtureNum, col, rowTop)
+-- confirmOrientation=true (RGB only): arrange, highlight first/last pixel
+-- red/blue, ask which axes (if any) to invert. confirmOrientation=false
+-- (White): no color (White pixels have no RGB attribute to set), just
+-- turn each fixture's first pixel on at full so there's some visual
+-- confirmation, and reuse whatever invert decision the RGB pass already
+-- made (forcedInvertX/Y) rather than asking again - RGB and White are the
+-- same physical fixtures, so they need to agree on orientation.
+-- Returns (success, invertedX, invertedY) - passed to the next call as
+-- forcedInvertX/forcedInvertY.
+--
+-- Native MA3 technique for reversing pixel order in the Selection Grid
+-- (user-confirmed, 2026-09-05/08): NO reselection - once the grid is
+-- built (arrangeFixture's own Grid+Fixture calls), that placement is
+-- already the active selection, so just flip whatever's already
+-- selected. Re-grabbing the fixture right before flipping (tried several
+-- orderings) collapsed a 2-row arrangement into one row every time via
+-- plain Cmd(), while flipping immediately with no reselect preserved it
+-- correctly (confirmed live). Y must run BEFORE X, and Y only applies at
+-- all when the section spans more than one grid row.
+local function flipFixtureAxes(section, invertX, invertY)
+    if invertY and #section.rows > 1 then
+        Cmd("Grid 'Flip' 'Y'")
+    end
+    if invertX then
+        Cmd("Grid 'Flip' 'X'")
+    end
+end
+
+-- isRGBSection controls the RGB-specific behavior (color highlight, Y
+-- checkbox offered); showOrientationCheck controls whether ANY invert
+-- popup shows at all (tied to profile.orientationCheck, same value passed
+-- to both the RGB and White calls for one profile). White gets its own
+-- "Invert X" checkbox (asked fresh, independent of RGB's X decision) but
+-- never a Y checkbox - Y stays whatever RGB already decided, carried in
+-- via forcedInvertY and never re-toggled here.
+local function arrangeAndStore(display_handle, fixtureList, fixturesPerTruss, section, groupChoices, popupTitle, isRGBSection, showOrientationCheck, forcedInvertX, forcedInvertY)
+    local invertedX = forcedInvertX or false
+    local invertedY = forcedInvertY or false
+
+    Cmd("Clear")
+
+    local firstPixel = section.rows[1][1]
+    local lastPixel = section.rows[#section.rows][2]
+
+    -- Set the visual check FIRST (RGB: highlight blue/red/green. White: no
+    -- color available, so zero the whole range then bring just the first
+    -- pixel to full), THEN build the Selection Grid. Building the grid
+    -- last means the final Fixture/Thru command run is part of
+    -- arrangeFixture's own placement, not whatever the check sequence
+    -- ends on - and leaves the whole arranged fixture visible/selected in
+    -- the Selection Grid afterward instead of stuck on a single pixel.
+    if isRGBSection then
+        for _, fixtureNum in ipairs(fixtureList) do
+            local prefix = section.prefix(fixtureNum)
+            highlightPixel(string.format('%s.%d Thru %d', prefix, firstPixel, lastPixel), 0, 0, 100)
+            highlightPixel(string.format('%s.%d', prefix, firstPixel), 100, 0, 0)
+            highlightPixel(string.format('%s.%d', prefix, lastPixel), 0, 100, 0)
+        end
+    else
+        for _, fixtureNum in ipairs(fixtureList) do
+            local prefix = section.prefix(fixtureNum)
+            Cmd(string.format('Fixture %s.%d Thru %d', prefix, firstPixel, lastPixel))
+            Cmd('At 0')
+            Cmd(string.format('Fixture %s.%d', prefix, firstPixel))
+            Cmd('At Full')
+        end
     end
 
-    local groupName = choicePopup(display_handle, popupTitle, groupChoices)
+    forEachFixturePlacement(fixtureList, fixturesPerTruss, section, function(fixtureNum, col, rowTop)
+        arrangeFixture(section, fixtureNum, col, rowTop)
+    end)
+
+    if invertedX or invertedY then
+        for _, fixtureNum in ipairs(fixtureList) do
+            flipFixtureAxes(section, invertedX, invertedY)
+        end
+    end
+
+    if showOrientationCheck then
+        -- Loop with independent X/Y checkboxes (both RGB and White) so any
+        -- combination can be applied, toggling as many times as needed -
+        -- submit with nothing checked to confirm and move on. Y is a no-op
+        -- anyway when the section only has one grid row (flipFixtureAxes
+        -- checks #section.rows), so no need to hide the checkbox itself.
+        local checkX, checkY
+        repeat
+            local result = MessageBox({
+                icon = ensureLogoTexture() or 'object_smart',
+                backColor = ensurePinkColorPath() or 'Window.Plugins',
+                title = 'PixelGroupStore',
+                message = isRGBSection
+                    and 'Fixture = BLUE, first pixel = RED, last pixel = GREEN.\nCheck any axis that needs inverting, then Apply.\nApply with nothing checked to confirm and continue.'
+                    or 'First pixel is at full, rest are off.\nCheck any axis that needs inverting, then Apply.\nApply with nothing checked to confirm and continue.',
+                commands = { { value = 1, name = 'Apply' }, { value = 0, name = 'Cancel' } },
+                states = { { name = 'Invert X', state = false }, { name = 'Invert Y', state = false } },
+            })
+
+            if result == nil or result.result == nil or result.result == 0 then
+                Printf("PixelGroupStore: cancelled before storing")
+                return false, false, false
+            end
+
+            checkX = result.states ~= nil and result.states['Invert X'] == true
+            checkY = result.states ~= nil and result.states['Invert Y'] == true
+
+            if checkX or checkY then
+                for _, fixtureNum in ipairs(fixtureList) do
+                    flipFixtureAxes(section, checkX, checkY)
+                end
+                if checkX then invertedX = not invertedX end
+                if checkY then invertedY = not invertedY end
+            end
+        until not (checkX or checkY)
+    end
+
+    local groupName = swatchGroupPopup(display_handle, popupTitle, groupChoices)
     if groupName == nil then
         Printf("PixelGroupStore: cancelled before storing")
-        return false
+        return false, invertedX, invertedY
+    end
+
+    if groupName == "CUSTOM" then
+        local customName = TextInput("Group name or number", "")
+        if customName == nil or customName == "" then
+            Printf("PixelGroupStore: cancelled before storing")
+            return false, invertedX, invertedY
+        end
+        groupName = customName
     end
 
     Cmd(string.format("Store Group '%s' /o /nc", groupName))
-    Printf("PixelGroupStore: stored %d fixture(s) into Group '%s'", #fixtureList, groupName)
-    return true
+    Printf("PixelGroupStore: stored %d fixture(s) into Group '%s'%s", #fixtureList, groupName, (invertedX or invertedY) and " (inverted)" or "")
+    return true, invertedX, invertedY
 end
 
 -- Parses "401" (single fixture) or "401 Thru 410" (inclusive range) into a
@@ -662,6 +1032,15 @@ local function Main(display_handle, arguments)
     if fixtureType == nil then
         Printf("PixelGroupStore: cancelled")
         return
+    end
+
+    local modeChoices = FIXTURE_MODE_CHOICES[fixtureType]
+    if modeChoices ~= nil then
+        fixtureType = choicePopup(display_handle, "Which mode?", modeChoices)
+        if fixtureType == nil then
+            Printf("PixelGroupStore: cancelled")
+            return
+        end
     end
 
     local profile = FIXTURE_PROFILES[fixtureType]
@@ -705,11 +1084,19 @@ local function Main(display_handle, arguments)
         end
     end
 
-    if not arrangeAndStore(display_handle, fixtureList, fixturesPerTruss, profile.rgb, RGB_GROUPS, "Store RGB pixels into which group?") then
+    local rgbOk, invertedX, invertedY = arrangeAndStore(display_handle, fixtureList, fixturesPerTruss, profile.rgb, RGB_GROUPS, "Store RGB pixels into which group?", true, profile.orientationCheck == true)
+    if not rgbOk then
         return
     end
 
-    if not arrangeAndStore(display_handle, fixtureList, fixturesPerTruss, profile.white, WHITE_GROUPS, "Store White pixels into which group?") then
+    -- Clear the programmer after the RGB store (same as pressing Clear
+    -- three times by hand) before moving on to White.
+    Cmd("Clear")
+    Cmd("Clear")
+    Cmd("Clear")
+
+    local whiteOk = arrangeAndStore(display_handle, fixtureList, fixturesPerTruss, profile.white, WHITE_GROUPS, "Store White pixels into which group?", false, profile.orientationCheck == true, invertedX, invertedY)
+    if not whiteOk then
         return
     end
 

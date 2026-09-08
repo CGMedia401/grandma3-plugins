@@ -797,91 +797,69 @@ local function writeReport(result)
     return fullPath
 end
 
+-- Creates (once) a real, persistent, custom-named ColorGroup with a pink
+-- Color entry, and returns its dot-path string ("DeleteHardValues.Pink")
+-- for use as a MessageBox backColor. MessageBox.backColor only accepts a
+-- STRING theme-path reference (same shape as 'Window.Plugins') - passing
+-- a raw Color object/handle silently does nothing (confirmed live via
+-- PixelGroupStoreV2). This registers our own named group/color under
+-- ColorTheme.ColorGroups so the string path points at a color we
+-- actually control instead of hoping an existing theme slot is pink.
+local function ensurePinkColorPath()
+    local groups = Root().ColorTheme.ColorGroups
+    local okGroup, group = pcall(function() return groups['DeleteHardValues'] end)
+    if not (okGroup and group ~= nil) then
+        local okAppend, newGroup = pcall(function()
+            local g = groups:Append('ColorGroup')
+            g.Name = 'DeleteHardValues'
+            return g
+        end)
+        if not (okAppend and newGroup ~= nil) then
+            Printf('DeleteHardValues pink debug: could not create ColorGroup ok=%s', tostring(okAppend))
+            return nil
+        end
+        group = newGroup
+    end
+
+    local okColor, color = pcall(function() return group['Pink'] end)
+    if not (okColor and color ~= nil) then
+        local okAppend, newColor = pcall(function()
+            local c = group:Append('Color')
+            c.Name = 'Pink'
+            return c
+        end)
+        if not (okAppend and newColor ~= nil) then
+            Printf('DeleteHardValues pink debug: could not create Pink Color entry ok=%s', tostring(okAppend))
+            return nil
+        end
+        color = newColor
+    end
+
+    local okSet, setErr = pcall(function() color.RGBA = 'E628A0FF' end)
+    Printf('DeleteHardValues pink debug: set RGBA ok=%s err=%s', tostring(okSet), tostring(setErr))
+
+    return 'DeleteHardValues.Pink'
+end
+
 -- ===================================================================
 -- Main
 -- ===================================================================
 
 local function Main(display_handle, arguments)
-    local cancelled = false
-    local continue = false
+    local pinkPath = ensurePinkColorPath()
 
-    local baseInput = GetFocusDisplay().ScreenOverlay:Append('BaseInput')
-    baseInput.Name = 'DeleteHardValuesWindow'
-    baseInput.H = 0
-    baseInput.W = 560
-    baseInput.Columns = 1
-    baseInput.Rows = 2
-    baseInput[1][1].SizePolicy = 'Fixed'
-    baseInput[1][1].Size = 60
-    baseInput[1][2].SizePolicy = 'Stretch'
-    baseInput.AutoClose = 'No'
-    baseInput.CloseOnEscape = 'Yes'
+    -- Plain MessageBox, same style as every other prompt in this project -
+    -- the custom hand-built pink header belongs ONLY to PixelGroupStoreV2's
+    -- two swatch-color group-selection popups, nowhere else.
+    local result = MessageBox({
+        icon = ensureLogoTexture() or 'object_smart',
+        backColor = pinkPath or 'Window.Plugins',
+        title = 'Delete Hard Values',
+        message = 'Scan for hard-coded attribute values\n(not preset-linked, not recipe-driven).\n\nYou will be asked which sequence(s) to scan next.\n\nSCAN ONLY - nothing is deleted yet. A report is\nwritten to the Showfiles folder for review.',
+        commands = { { value = 1, name = 'Choose Sequence(s) & Scan' }, { value = 0, name = 'Close' } },
+    })
 
-    local titleBar = baseInput:Append('TitleBar')
-    titleBar.Columns = 2
-    titleBar.Rows = 1
-    titleBar.Anchors = '0,0'
-    titleBar[2][2].SizePolicy = 'Fixed'
-    titleBar[2][2].Size = 50
-    titleBar.Texture = 'corner2'
-
-    local titleBarIcon = titleBar:Append('TitleButton')
-    titleBarIcon.Text = 'Delete Hard Values'
-    titleBarIcon.Texture = 'corner1'
-    titleBarIcon.Anchors = '0,0'
-    titleBarIcon.Icon = ensureLogoTexture() or 'star'
-
-    local titleBarCloseButton = titleBar:Append('CloseButton')
-    titleBarCloseButton.Anchors = '1,0'
-    titleBarCloseButton.Texture = 'corner2'
-    titleBarCloseButton.PluginComponent = my_handle
-    titleBarCloseButton.Clicked = 'DHV_CloseClicked'
-
-    local dlgFrame = baseInput:Append('DialogFrame')
-    dlgFrame.H = '100%'
-    dlgFrame.W = '100%'
-    dlgFrame.Columns = 1
-    dlgFrame.Rows = 2
-    dlgFrame.Anchors = '0,1'
-    dlgFrame[1][1].SizePolicy = 'Stretch'
-    dlgFrame[1][2].SizePolicy = 'Fixed'
-    dlgFrame[1][2].Size = 60
-
-    local contentArea = dlgFrame:Append('UILayoutGrid')
-    contentArea.Columns = 1
-    contentArea.Rows = 1
-    contentArea.Anchors = '0,0'
-
-    local infoText = contentArea:Append('Button')
-    infoText.Anchors = '0,0'
-    infoText.Text = 'Scan for hard-coded attribute values\n(not preset-linked, not recipe-driven).\n\nYou will be asked which sequence(s) to scan next.\n\nSCAN ONLY - nothing is deleted yet. A report is\nwritten to the Showfiles folder for review.'
-    infoText.Font = 'Medium20'
-    infoText.TextalignmentH = 'Centre'
-
-    local scanButton = dlgFrame:Append('Button')
-    scanButton.Anchors = '0,1'
-    scanButton.Textshadow = 1
-    scanButton.HasHover = 'Yes'
-    scanButton.Text = 'Choose Sequence(s) & Scan'
-    scanButton.Font = 'Medium20'
-    scanButton.TextalignmentH = 'Centre'
-    scanButton.PluginComponent = my_handle
-    scanButton.Clicked = 'DHV_ScanClicked'
-
-    signalTable.DHV_ScanClicked = function(caller)
-        GetFocusDisplay().ScreenOverlay:ClearUIChildren()
-        continue = true
-    end
-
-    signalTable.DHV_CloseClicked = function(caller)
-        GetFocusDisplay().ScreenOverlay:ClearUIChildren()
-        cancelled = true
-        continue = true
-    end
-
-    repeat until continue
-
-    if cancelled then
+    if result == nil or result.result == nil or result.result == 0 then
         Printf('Delete Hard Values: cancelled')
         return
     end
@@ -898,6 +876,7 @@ local function Main(display_handle, arguments)
             Printf('Delete Hard Values: %s', parseErr)
             pcall(function()
                 MessageBox({
+                    backColor = pinkPath or 'Window.Plugins',
                     title = 'Delete Hard Values',
                     message = parseErr,
                     commands = {{value = 1, name = 'OK'}},
@@ -934,6 +913,7 @@ local function Main(display_handle, arguments)
             scopeDesc, result.cueCount, result.partCount, result.hardCount, reportDesc)
         pcall(function()
             MessageBox({
+                backColor = pinkPath or 'Window.Plugins',
                 title = 'Delete Hard Values - Scan Complete',
                 message = summary,
                 commands = {{value = 1, name = 'OK'}},
@@ -950,6 +930,7 @@ local function Main(display_handle, arguments)
 
     local okBox, box = pcall(function()
         return MessageBox({
+            backColor = pinkPath or 'Window.Plugins',
             title = 'Delete Hard Values - Confirm Delete',
             message = confirmMsg,
             commands = {{value = 1, name = 'Delete'}, {value = 0, name = 'Cancel'}},
@@ -978,6 +959,7 @@ local function Main(display_handle, arguments)
     Printf('Delete Hard Values: %s', resultSummary:gsub('\n', ' | '))
     pcall(function()
         MessageBox({
+            backColor = pinkPath or 'Window.Plugins',
             title = 'Delete Hard Values - Delete Complete',
             message = resultSummary,
             commands = {{value = 1, name = 'OK'}},
