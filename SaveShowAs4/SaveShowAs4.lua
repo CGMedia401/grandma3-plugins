@@ -372,118 +372,69 @@ end
 -- Main
 -- ===================================================================
 
+-- Creates (once) a real, persistent, custom-named ColorGroup with a pink
+-- Color entry, and returns its dot-path string ("SaveShowAs4.Pink") for
+-- use as a backColor - works for MessageBox's backColor field AND for
+-- Button.BackColor (both take a STRING theme-path reference; a raw Color
+-- object/handle silently does nothing on MessageBox, live-tested
+-- 2026-09-06 on PixelGroupStoreV2). Registers our own named group/color
+-- under ColorTheme.ColorGroups, the same technique the YLD LeftRight
+-- reference plugin uses.
+local function ensurePinkColorPath()
+    local groups = Root().ColorTheme.ColorGroups
+    local okGroup, group = pcall(function() return groups['SaveShowAs4'] end)
+    if not (okGroup and group ~= nil) then
+        local okAppend, newGroup = pcall(function()
+            local g = groups:Append('ColorGroup')
+            g.Name = 'SaveShowAs4'
+            return g
+        end)
+        if not (okAppend and newGroup ~= nil) then
+            Printf('SS4 pink debug: could not create SaveShowAs4 ColorGroup ok=%s', tostring(okAppend))
+            return nil
+        end
+        group = newGroup
+    end
+
+    local okColor, color = pcall(function() return group['Pink'] end)
+    if not (okColor and color ~= nil) then
+        local okAppend, newColor = pcall(function()
+            local c = group:Append('Color')
+            c.Name = 'Pink'
+            return c
+        end)
+        if not (okAppend and newColor ~= nil) then
+            Printf('SS4 pink debug: could not create Pink Color entry ok=%s', tostring(okAppend))
+            return nil
+        end
+        color = newColor
+    end
+
+    local okSet, setErr = pcall(function() color.RGBA = 'E628A0FF' end)
+    Printf('SS4 pink debug: set RGBA ok=%s err=%s', tostring(okSet), tostring(setErr))
+
+    return 'SaveShowAs4.Pink'
+end
+
 local function Main(display_handle, arguments)
     local baseName
-    local cancelled = false
-    local choice = nil
-    local continue = false
 
-    -- Same custom window chrome as GroupCleanupV4 - BaseInput/TitleBar with
-    -- the CG logo/CloseButton/DialogFrame - instead of the stock PopupInput
-    -- YES/NO dialog.
-    local baseInput = GetFocusDisplay().ScreenOverlay:Append('BaseInput')
-    baseInput.Name = 'SaveShowAs4Window'
-    baseInput.H = 0
-    baseInput.W = 500
-    baseInput.Columns = 1
-    baseInput.Rows = 2
-    baseInput[1][1].SizePolicy = 'Fixed'
-    baseInput[1][1].Size = 60
-    baseInput[1][2].SizePolicy = 'Stretch'
-    baseInput.AutoClose = 'No'
-    baseInput.CloseOnEscape = 'Yes'
+    -- Plain MessageBox, same style as every other prompt in this project -
+    -- the custom hand-built pink header belongs ONLY to PixelGroupStoreV2's
+    -- two swatch-color group-selection popups, nowhere else.
+    local result = MessageBox({
+        icon = ensureLogoTexture() or 'object_smart',
+        backColor = ensurePinkColorPath() or 'Window.Plugins',
+        title = 'Save Show As 4',
+        message = 'Rename the show before saving?',
+        commands = { { value = 1, name = 'YES' }, { value = 0, name = 'NO' } },
+    })
 
-    local titleBar = baseInput:Append('TitleBar')
-    titleBar.Columns = 2
-    titleBar.Rows = 1
-    titleBar.Anchors = '0,0'
-    titleBar[2][2].SizePolicy = 'Fixed'
-    titleBar[2][2].Size = 50
-    titleBar.Texture = 'corner2'
-
-    local titleBarIcon = titleBar:Append('TitleButton')
-    titleBarIcon.Text = 'Rename the show before saving?'
-    titleBarIcon.Texture = 'corner1'
-    titleBarIcon.Anchors = '0,0'
-    titleBarIcon.Icon = ensureLogoTexture() or 'star'
-
-    local titleBarCloseButton = titleBar:Append('CloseButton')
-    titleBarCloseButton.Anchors = '1,0'
-    titleBarCloseButton.Texture = 'corner2'
-    titleBarCloseButton.PluginComponent = my_handle
-    titleBarCloseButton.Clicked = 'SS_CloseClicked'
-
-    local dlgFrame = baseInput:Append('DialogFrame')
-    dlgFrame.H = '100%'
-    dlgFrame.W = '100%'
-    dlgFrame.Columns = 1
-    dlgFrame.Rows = 1
-    dlgFrame.Anchors = '0,1'
-    -- Fixed, not Stretch: with baseInput.H = 0 (auto-height) and no other
-    -- Fixed row in this DialogFrame to anchor against, Stretch collapses to
-    -- 0px and the button row renders invisibly (confirmed live 2026-09-04 -
-    -- buttons were still clickable, just not visible). GroupCleanupV4 and
-    -- SaveShowAs3 both give their button cells a real Fixed size instead.
-    dlgFrame[1][1].SizePolicy = 'Fixed'
-    dlgFrame[1][1].Size = 100
-
-    -- Plain UILayoutGrid for the actual YES/NO split, not DialogFrame's own
-    -- multi-column cells (untested/unreliable here) - same Columns=2,Rows=1
-    -- shape as GroupCleanupV4's confirmed-working swatch/checkbox row grid,
-    -- both sides Stretch for an even 50/50 split, explicit H for a tall row.
-    local buttonRow = dlgFrame:Append('UILayoutGrid')
-    buttonRow.H = 100
-    buttonRow.W = '100%'
-    buttonRow.Columns = 2
-    buttonRow.Rows = 1
-    buttonRow.Anchors = '0,0'
-    buttonRow[1][1].SizePolicy = 'Stretch'
-    buttonRow[2][1].SizePolicy = 'Stretch'
-
-    local yesButton = buttonRow:Append('Button')
-    yesButton.Anchors = '0,0'
-    yesButton.Textshadow = 1
-    yesButton.HasHover = 'Yes'
-    yesButton.Text = 'YES'
-    yesButton.Font = 'Medium20'
-    yesButton.TextalignmentH = 'Centre'
-    yesButton.PluginComponent = my_handle
-    yesButton.Clicked = 'SS_YesClicked'
-
-    local noButton = buttonRow:Append('Button')
-    noButton.Anchors = '1,0'
-    noButton.Textshadow = 1
-    noButton.HasHover = 'Yes'
-    noButton.Text = 'NO'
-    noButton.Font = 'Medium20'
-    noButton.TextalignmentH = 'Centre'
-    noButton.PluginComponent = my_handle
-    noButton.Clicked = 'SS_NoClicked'
-
-    signalTable.SS_YesClicked = function(caller)
-        GetFocusDisplay().ScreenOverlay:ClearUIChildren()
-        choice = 'YES'
-        continue = true
-    end
-
-    signalTable.SS_NoClicked = function(caller)
-        GetFocusDisplay().ScreenOverlay:ClearUIChildren()
-        choice = 'NO'
-        continue = true
-    end
-
-    signalTable.SS_CloseClicked = function(caller)
-        GetFocusDisplay().ScreenOverlay:ClearUIChildren()
-        cancelled = true
-        continue = true
-    end
-
-    repeat until continue
-
-    if cancelled or choice == nil then
+    if result == nil or result.result == nil then
         Printf("Save Show As 4: cancelled")
         return
     end
+    local choice = (result.result == 1) and "YES" or "NO"
 
     if choice == "YES" then
         local currentName = Root().ManetSocket.Showfile
